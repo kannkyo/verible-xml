@@ -1,0 +1,86 @@
+name: python publish
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8]
+        poetry-version: [1.1.11]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: snok/install-poetry@v1
+        with:
+          version: ${{ inputs.poetry-version }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - uses: actions/cache@v2
+        id: poetry_cache_id
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      - name: install dependencies
+        if: steps.poetry_cache_id.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          poetry install
+      - name: generate sbom
+        run: |
+          poetry run cyclonedx-py -e --format json -o sbom.json --force
+      - name: build package
+        run: poetry build
+      - name: upload packages
+        uses: actions/upload-artifact@v2.2.4
+        with:
+          name: package
+          path: dist/
+
+  pages:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8]
+        poetry-version: [1.1.11]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: snok/install-poetry@v1
+        with:
+          version: ${{ inputs.poetry-version }}
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - uses: actions/cache@v2
+        id: poetry_cache_id
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      - name: install dependencies
+        if: steps.poetry_cache_id.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          poetry install
+      - name: generate sphinx
+        run: |
+          poetry run sphinx-apidoc -f -o docs/api src/
+          poetry run sphinx-build -M html docs/ public/
+          # FIXME: add .nojekyll to upload _static ( see https://qiita.com/key-amb/items/4f799fed51734987f3c5 )
+          touch public/.nojekyll
+      - name: deploy document to gh-pages
+        uses: crazy-max/ghaction-github-pages@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          target_branch: gh-pages
+          build_dir: public/
